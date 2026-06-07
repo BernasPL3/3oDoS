@@ -1,184 +1,82 @@
 #!/bin/bash
 
-set -e
+DEVKITPRO=/opt/devkitpro
+DEVKITARM=$DEVKITPRO/devkitARM
 
-SDK_NAME="3DS-SDK"
-
-# Detecta devkitPro
-if [ -z "$DEVKITPRO" ]; then
-    echo "DEVKITPRO não definido."
-    echo "Instale o devkitPro e configure as variáveis de ambiente."
-    exit 1
-fi
-
-# Toolchain
-export DEVKITARM="${DEVKITPRO}/devkitARM"
-
-ARMGCC="${DEVKITARM}/bin/arm-none-eabi-gcc"
-ARMGXX="${DEVKITARM}/bin/arm-none-eabi-g++"
-
-LIBCTRU="${DEVKITPRO}/libctru"
+ARMGCC=$DEVKITARM/bin/arm-none-eabi-gcc
 
 case "$1" in
 
-    new)
-        if [ -z "$2" ]; then
-            echo "Uso: 3ds-sdk new <nome>"
-            exit 1
-        fi
+build)
 
-        mkdir -p "$2/source"
-        mkdir -p "$2/include"
-        mkdir -p "$2/assets"
-        mkdir -p "$2/build"
+    mkdir -p build
 
-cat > "$2/source/main.c" << 'EOF'
-#include <3ds.h>
-#include <stdio.h>
+    CFILES=$(find source -name "*.c")
 
-int main(int argc, char **argv)
-{
-    gfxInitDefault();
-    consoleInit(GFX_TOP, NULL);
+    echo "Compilando..."
 
-    printf("Hello from 3DS-SDK!\n");
-    printf("Press START to exit.\n");
+    $ARMGCC $CFILES \
+    -o build/game.elf \
+    -Iinclude \
+    -I$DEVKITPRO/libctru/include \
+    -L$DEVKITPRO/libctru/lib \
+    -lctru \
+    -march=armv6k \
+    -mtune=mpcore \
+    -mfloat-abi=hard \
+    -mtp=soft \
+    -DARM11 \
+    -D_3DS
 
-    while (aptMainLoop())
-    {
-        hidScanInput();
+    echo "Gerando icon.smdh..."
 
-        u32 kDown = hidKeysDown();
+    smdhtool --create \
+    "3oDoS" \
+    "3oDoS Engine" \
+    "BernasPL3" \
+    assets/icon.png \
+    icon.smdh
 
-        if (kDown & KEY_START)
-            break;
+    echo "Gerando 3DSX..."
 
-        gfxFlushBuffers();
-        gfxSwapBuffers();
-        gspWaitForVBlank();
-    }
+    3dsxtool \
+    build/game.elf \
+    build/game.3dsx \
+    --smdh=icon.smdh
 
-    gfxExit();
-    return 0;
-}
-EOF
+    echo "Build concluído!"
+    ;;
 
-        echo "Projeto criado: $2"
-        ;;
+cia)
 
-    build)
+    echo "Gerando CIA..."
 
-        mkdir -p build
+    picasso \
+    -o build/game.cia \
+    build/game.elf
 
-        CFILES=$(find source -name "*.c")
-        CPPFILES=$(find source -name "*.cpp")
+    echo "CIA gerado!"
+    ;;
 
-        if [ -n "$CPPFILES" ]; then
-            echo "Compilando C++ para Nintendo 3DS..."
+clean)
 
-            $ARMGXX $CPPFILES \
-                -o build/game.elf \
-                -Iinclude \
-                -I"${LIBCTRU}/include" \
-                -L"${LIBCTRU}/lib" \
-                -lctru \
-                -march=armv6k \
-                -mtune=mpcore \
-                -mfloat-abi=hard \
-                -mtp=soft \
-                -DARM11 \
-                -D_3DS
+    rm -rf build
 
-        elif [ -n "$CFILES" ]; then
-            echo "Compilando C para Nintendo 3DS..."
+    echo "Build removido."
+    ;;
 
-            $ARMGCC $CFILES \
-                -o build/game.elf \
-                -Iinclude \
-                -I"${LIBCTRU}/include" \
-                -L"${LIBCTRU}/lib" \
-                -lctru \
-                -march=armv6k \
-                -mtune=mpcore \
-                -mfloat-abi=hard \
-                -mtp=soft \
-                -DARM11 \
-                -D_3DS
+run)
 
-        else
-            echo "Nenhum arquivo .c ou .cpp encontrado em source/"
-            exit 1
-        fi
+    echo "Copie build/game.3dsx para o SD do 3DS."
+    ;;
 
-        echo "Gerando .3dsx..."
+*)
 
-        3dsxtool build/game.elf build/game.3dsx
+    echo "Uso:"
+    echo "  3ds-sdk build"
+    echo "  3ds-sdk cia"
+    echo "  3ds-sdk run"
+    echo "  3ds-sdk clean"
+    ;;
 
-        echo "Build concluído:"
-        echo "  build/game.elf"
-        echo "  build/game.3dsx"
-        ;;
-
-    cia)
-
-        if [ ! -f build/game.elf ]; then
-            echo "Faça o build primeiro."
-            exit 1
-        fi
-
-        makerom \
-            -f cia \
-            -o build/game.cia \
-            -elf build/game.elf
-
-        echo "CIA gerado:"
-        echo "  build/game.cia"
-        ;;
-
-    run)
-
-        if [ ! -f build/game.3dsx ]; then
-            echo "Faça o build primeiro."
-            exit 1
-        fi
-
-        echo "Envie build/game.3dsx para o SD do 3DS."
-        ;;
-
-    clean)
-
-        rm -rf build
-        echo "Build removido."
-        ;;
-
-    doctor)
-
-        echo "Verificando ambiente..."
-
-        command -v "$ARMGCC" >/dev/null 2>&1 \
-            && echo "arm-none-eabi-gcc OK" \
-            || echo "arm-none-eabi-gcc NÃO encontrado"
-
-        command -v 3dsxtool >/dev/null 2>&1 \
-            && echo "3dsxtool OK" \
-            || echo "3dsxtool NÃO encontrado"
-
-        command -v makerom >/dev/null 2>&1 \
-            && echo "makerom OK" \
-            || echo "makerom NÃO encontrado"
-
-        ;;
-
-    help|*)
-
-        echo "$SDK_NAME"
-        echo ""
-        echo "Comandos disponíveis:"
-        echo "  new <nome>   Criar projeto"
-        echo "  build        Compilar projeto"
-        echo "  cia          Gerar CIA"
-        echo "  clean        Limpar build"
-        echo "  run          Informações para execução"
-        echo "  doctor       Diagnóstico do ambiente"
-        ;;
 esac
